@@ -93,17 +93,16 @@ def append_user(store: JsonStore, session_id: str, prompt: str) -> str:
         raise ValueError("empty user prompt")
     with store.transaction():
         session = load_session(store, session_id)
-        if session.pending or session.status not in ("ready", "running"):
-            raise ValueError("session pending or running")
+        if session.pending or session.status not in ("ready","running"):
+            raise ValueError()
         if session.entries:
-            last = session.entries[-1]
-            if not isinstance(last, AIMessage) or last.tool_calls:
-                raise ValueError("session pending or running")
-        entry = Entry(message_json=encode([HumanMessage(prompt)]))
+            last = decode(session.entries[-1])
+            if not isinstance(last,AIMessage) or last.tool_calls:
+                raise ValueError()
+        entry = Entry(message_json=encode([HumanMessage(content=prompt)]))
         session.entries.append(entry)
         session.status = "running"
         session.reason = ""
-        save_session(store, session)
     return entry.id
 
 
@@ -113,14 +112,14 @@ def commit_response(store: JsonStore, session_id: str, response: AIMessage) -> s
     with store.transaction():
         session = load_session(store, session_id)
         if session.pending or session.status != "running":
-            raise ValueError("session pending or running")
+            raise ValueError()
         if session.entries:
             last = decode(session.entries[-1])
-            if not isinstance(last, (HumanMessage, ToolMessage)):
-                raise ValueError("session pending or running")
+            if not isinstance(last,(HumanMessage,ToolMessage)):
+                raise ValueError()
         entry = Entry(message_json=encode([response]))
         session.entries.append(entry)
-        session.pending = {(call["id"] or ""): call["name"] for call in calls}
+        session.pending = {(call["id"] or ""):call["name"] for call in calls}
         save_session(store, session)
     return entry.id
 
@@ -136,7 +135,7 @@ def commit_tool_result(
     with store.transaction():
         session = load_session(store, session_id)
         if session.pending.get(result.tool_call_id) != result.name:
-            raise ValueError("session pending or running")
+            raise ValueError()
         entry = Entry(
             message_json=encode([result]),
             raw_json=encode([original]),

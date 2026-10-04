@@ -66,48 +66,47 @@ class Hooks:
             if name == "before_model":
                 if not isinstance(current, list) or not isinstance(result, list):
                     raise ValueError
-                if not current or len(current) > len(result):
+                if not current or len(result) < len(current):
                     raise ValueError
-                if result[:len(current)] != current:
+                if result[:-len(current)] != current:
                     raise ValueError
                 for message in result[:-len(current)]:
                     if (
-                            not isinstance(message, HumanMessage)
-                            or not isinstance(message.content, str)
-                            or not message.content.strip()
+                        not isinstance(message, HumanMessage)
+                        or not isinstance(message.content,str)
+                        or not message.content
                     ):
                         raise ValueError
                 current = deepcopy(result)
             elif name == "after_tool":
-                if not isinstance(current, ToolMessage) or not isinstance(result, ToolMessage):
+                if not isinstance(current,ToolMessage) or not isinstance(result, ToolMessage):
                     raise ValueError
                 if (
-                        result.name,
-                        result.tool_call_id,
-                        result.status,
-                        result.artifact
+                    result.name,
+                    result.tool_call_id,
+                    result.status,
+                    result.artifact
                 ) != (
-                        result.name,
-                        result.tool_call_id,
-                        result.status,
-                        result.artifact
+                    current.name,
+                    current.tool_call_id,
+                    current.status,
+                    current.artifact
                 ):
                     raise ValueError
                 current = deepcopy(result)
-            elif name in ("before_tool", "after_turn"):
-                if not isinstance(result, Decision):
+            elif name in ("before_tool","after_turn"):
+                if not isinstance(result,Decision):
                     raise ValueError
                 if result.stop:
-                    if not result.reason.strip():
+                    if not result.reason:
                         raise ValueError
                     return result
             else:
                 raise ValueError
-        if name in ("before_tool", "after_turn"):
+        if name in ("before_tool","after_turn"):
             return Decision()
         if name == "after_model":
             return None
-        if isinstance(current, (list, ToolMessage)):
+        if isinstance(current,(list,ToolMessage)):
             return current
-        else:
-            raise ValueError
+        raise ValueError

@@ -39,7 +39,7 @@ def remember(
     if not confirmed:
         raise PermissionError("explicit confirmation required")
     if scope not in store.allowed_scopes:
-        raise PermissionError("memory belongs to another scope")
+        raise ValueError(f"scope {scope} not allowed")
     sessions = [
         SessionData.model_validate_json(body)
         for body in store.database.all("session")
@@ -49,7 +49,7 @@ def remember(
         and any(entry.id == source_entry_id for entry in sessions)
         for session in sessions
     ):
-        raise ValueError()
+        raise ValueError(f"session {source_entry_id} not allowed")
     for body in store.database.all("memory"):
         memory = Memory.model_validate_json(body)
         if (
@@ -63,48 +63,37 @@ def remember(
         scope=scope,
         source_entry_id=source_entry_id,
     )
+    store.database.put("memory", memory.id, memory.model_dump_json())
     return memory
-
-
-
-
-
-
-
 
 
 def recall(
         store: MemoryStore, query: str, allowed_scopes: frozenset[str], limit: int = 5
 ) -> list[Memory]:
-    if limit <= 0:
-        raise ValueError
     if not allowed_scopes <= store.allowed_scopes:
-        raise PermissionError("memory belongs to another scope")
-    keyword = query.casefold().split()
-    if not keyword:
+        raise ValueError(f"scope {allowed_scopes} not allowed")
+    if not query.strip():
         return []
-    ranked:list[tuple[int, Memory]] = []
+    keyword = query.casefold().split()
+    ranked:list[tuple[int,Memory]] = []
+    seen:list[tuple[str,str]] = []
+    result:list[Memory] = []
     for body in store.database.all("memory"):
         memory = Memory.model_validate_json(body)
         if not memory.active or memory.scope not in allowed_scopes:
             continue
-        score = sum(word in memory.text.casefold() for word in keyword)
+        score = sum(word in memory.text for word in keyword)
         if score:
             ranked.append((score, memory))
     ranked.sort(key=lambda pair:(-pair[0], pair[1].id))
-    seen:set[tuple[str,str]] = set()
-    results:list[Memory] = []
     for _,memory in ranked:
-        key = (memory.scope,memory.text)
+        key = (memory.scope, memory.text)
         if key not in seen:
-            seen.add(key)
-            results.append(memory)
-            if len(results) >= limit:
-                break
-    return results
-
-
-
+            seen.append(key)
+            result.append(memory)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def forget(store: MemoryStore, memory_id: str, *, confirmed: bool) -> None:
