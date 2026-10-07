@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
 import json
 
 from dita.context import (
@@ -13,7 +13,7 @@ from dita.context import (
     uncovered_entries,
     safe_boundaries,
 )
-from dita.loop_common import response_calls
+from dita.model_io import SUMMARY_MAX_TOKENS
 from dita.session import Entry, decode, encode, history_messages
 
 type Summarizer = Callable[[str], Awaitable[str]]
@@ -28,12 +28,11 @@ def choose_compaction_range(
         entries: Sequence[Entry], *, keep_tokens: int = 6000
 ) -> list[Entry]:
     if not isinstance(keep_tokens, int) or keep_tokens < 0:
-        raise CompactionError("keep_tokens must be a positive integer")
+        raise TypeError("keep_tokens must be an integer >= 0")
     cuts = [cut for cut in safe_boundaries(entries)]
-    if not cuts:
-        return []
+    messages = history_messages(entries)
     for cut in cuts:
-        if estimate_tokens(history_messages(entries[cut:])) <= keep_tokens:
+        if estimate_tokens(messages[cut:]) <= keep_tokens:
             return list(entries[:cut])
     return list(entries[:cuts[-1]])
 
@@ -53,7 +52,7 @@ def serialize_for_summary(entries: Sequence[Entry]) -> str:
                         + content[-2000:]
                 )
             record.update(
-                too_call_id=message.tool_call_id,
+                tool_call_id=message.tool_call_id,
                 name=message.name,
                 status=message.status,
             )
@@ -92,5 +91,54 @@ async def compact(
         keep_tokens: int = 6000,
         max_calls: int = 4,
 ) -> Summary:
-    """TODO：按摘要输入预算分块，受限生成中间摘要，全部成功后返回候选。"""
-    raise NotImplementedError("请完成 compact")
+    if type(max_calls) is not int or max_calls < 1:
+        raise CompactionError("no summary calls remaining")
+    available = budget.input_limit
+    summary_input_limit = budget.input_limit - SUMMARY_MAX_TOKENS - budget.margin
+    if summary_input_limit < 0:
+        raise CompactionError("no summary input limit remaining")
+    remaining = uncovered_entries(entries, previous_summary)
+    covered = choose_compaction_range(remaining, keep_tokens=keep_tokens)
+    if not covered:
+        raise CompactionError("no uncovered entries remaining")
+    boundaries = safe_boundaries(covered)
+    previous = "" if previous_summary is None else previous_summary.text
+    text = previous
+    offset = 0
+    calls = 0
+    while offset < len(covered):
+        end = offset
+        prompt = ""
+        for boundary in boundaries:
+            if boundary <= offset:
+                continue
+            candidate_prompt = summary_prompt(text, covered[offset:boundary])
+            if (
+                    estimate_tokens([HumanMessage(content=candidate_prompt)])
+                    > summary_input_limit
+            ):
+                break
+            end, prompt = boundary, candidate_prompt
+        if end == offset:
+            raise CompactionError("summary plus one safe block exceeds input allowance")
+        if calls >= max_calls:
+            raise CompactionError("summary call allowance exhausted")
+        calls += 1
+        text = (await summarize_once(prompt)).strip()
+        if not text:
+            raise CompactionError("empty summary")
+        offset = end
+    before = estimate_tokens(
+        [HumanMessage(content=previous), *history_messages(covered)]
+    )
+    if estimate_tokens([HumanMessage(content=text)]) >= before:
+        raise CompactionError("summary did not reduce context")
+    old_ids = [] if previous_summary is None else previous_summary.covered_ids
+    old_memories = [] if previous_summary is None else previous_summary.memory_ids
+    return Summary(
+        text=text,
+        covered_ids=[*old_ids, *(entry.id for entry in covered)],
+        version=1 if previous_summary is None else previous_summary.version + 1,
+        created_at=datetime.now(UTC).isoformat(),
+        memory_ids=sorted(set(old_memories) | set(memory_ids)),
+    )
