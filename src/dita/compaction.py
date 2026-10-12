@@ -29,12 +29,13 @@ def choose_compaction_range(
 ) -> list[Entry]:
     if not isinstance(keep_tokens, int) or keep_tokens < 0:
         raise TypeError("keep_tokens must be an integer >= 0")
-    cuts = [cut for cut in safe_boundaries(entries)]
+    cuts = [cut for cut in safe_boundaries(entries) if 0 < cut < len(entries)]
     messages = history_messages(entries)
     for cut in cuts:
-        if estimate_tokens(messages[cut:]) <= keep_tokens:
+        if estimate_tokens(messages[cut:]) < keep_tokens:
             return list(entries[:cut])
     return list(entries[:cuts[-1]])
+
 
 
 def serialize_for_summary(entries: Sequence[Entry]) -> str:

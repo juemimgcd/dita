@@ -83,13 +83,13 @@ def safe_boundaries(entries: Sequence[Entry]) -> list[int]:
     boundaries = [0]
     pending:set[str] = set()
     for index, message in enumerate(messages):
-        if index and not pending and isinstance(message,(HumanMessage, AIMessage)):
+        if index and not pending and isinstance(message,(AIMessage, HumanMessage)):
             boundaries.append(index)
-        if isinstance(message, AIMessage):
+        if isinstance(message,AIMessage):
             pending.update(call["id"] or "" for call in response_calls(message))
-        elif isinstance(message, ToolMessage):
+        if isinstance(message,ToolMessage):
             pending.remove(message.tool_call_id)
-        elif not isinstance(message, HumanMessage):
+        if isinstance(message,HumanMessage):
             raise ValueError
     if entries:
         boundaries.append(len(entries))
@@ -100,14 +100,14 @@ def safe_boundaries(entries: Sequence[Entry]) -> list[int]:
 def uncovered_entries(entries: Sequence[Entry], summary: Summary | None) -> list[Entry]:
     if summary is None:
         return list(entries)
-    boundaries = safe_boundaries(entries)
     count = len(summary.covered_ids)
+    boundaries = safe_boundaries(entries)
     if (
         not count
         or [entry.id for entry in entries[:count]] != summary.covered_ids
         or count not in boundaries
     ):
-        raise ValueError
+        raise ValueError(f"uncovered entries {boundaries}")
     return list(entries[count:])
 
 
