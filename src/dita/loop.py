@@ -18,7 +18,7 @@ async def run_loop(prompt: str | None, runtime: Runtime) -> str:
     primary:BaseException | None = None
     try:
         async with asyncio.timeout(runtime.options.timeout):
-            await runtime.start(prompt)
+            await runtime.start(prompt=prompt)
             async with runtime.io.factory() as model:
                 while runtime.requests < runtime.options.max_requests:
                     messages = await runtime.prepare()
@@ -36,9 +36,8 @@ async def run_loop(prompt: str | None, runtime: Runtime) -> str:
                             and await runtime.retry(e)
                         ):
                             continue
-                        raise e
-                    await runtime.on_response(response)
                     calls = response_calls(response)
+                    await runtime.on_response(response)
                     result:list[ToolMessage] = []
                     if calls:
                         if (
@@ -46,6 +45,7 @@ async def run_loop(prompt: str | None, runtime: Runtime) -> str:
                             or runtime.tool_calls + len(calls) > runtime.options.max_tool_calls
                         ):
                             raise RuntimeError()
+                        runtime.tool_calls += len(calls)
                         for call in calls:
                             execution = await runtime.execute(call)
                             await runtime.on_result(execution)
